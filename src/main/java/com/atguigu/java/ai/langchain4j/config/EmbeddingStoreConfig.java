@@ -13,19 +13,36 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class EmbeddingStoreConfig {
 
-    // 统一通过 Spring 注入配置文件中的值
     @Value("${pinecone.api-key}")
     private String pineconeApiKey;
+
+    @Value("${pinecone.index:xiaozhi-index}")
+    private String pineconeIndex;
+
+    @Value("${pinecone.namespace.general:xiaozhi-namespace}")
+    private String generalNamespace;
+
+    @Value("${pinecone.namespace.medication:medication-namespace}")
+    private String medicationNamespace;
 
     @Autowired
     private EmbeddingModel embeddingModel;
 
-    @Bean
+    @Bean("embeddingStore")
     public EmbeddingStore<TextSegment> embeddingStore() {
+        return buildStore(generalNamespace);
+    }
+
+    @Bean("medicationEmbeddingStore")
+    public EmbeddingStore<TextSegment> medicationEmbeddingStore() {
+        return buildStore(medicationNamespace);
+    }
+
+    private EmbeddingStore<TextSegment> buildStore(String namespace) {
         return PineconeEmbeddingStore.builder()
-            .apiKey(pineconeApiKey) // 替换掉 System.getenv
-            .index("xiaozhi-index")
-            .nameSpace("xiaozhi-namespace")
+            .apiKey(pineconeApiKey)
+            .index(pineconeIndex)
+            .nameSpace(namespace)
             .createIndex(PineconeServerlessIndexConfig.builder()
                 .cloud("AWS")
                 .region("us-east-1")
