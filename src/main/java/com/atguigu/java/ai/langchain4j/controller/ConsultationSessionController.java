@@ -49,13 +49,23 @@ public class ConsultationSessionController {
     }
 
     @Operation(summary = "查询问诊会话列表")
-    @GetMapping("/list")
+    @GetMapping
     public ApiResponse<List<ConsultationSession>> list(@RequestParam("userId") Long userId,
                                                        @RequestParam(value = "patientId", required = false) Long patientId) {
+        if (userId == null) {
+            return ApiResponse.failure("userId不能为空");
+        }
         try {
             return ApiResponse.success(consultationSessionService.listByUserId(userId, patientId));
         } catch (Exception e) {
             return ApiResponse.failure("查询会话失败：" + e.getMessage());
         }
+    }
+
+    @Operation(summary = "查询问诊会话列表（兼容旧路径）")
+    @GetMapping("/list")
+    public ApiResponse<List<ConsultationSession>> listCompat(@RequestParam("userId") Long userId,
+                                                             @RequestParam(value = "patientId", required = false) Long patientId) {
+        return list(userId, patientId);
     }
 }

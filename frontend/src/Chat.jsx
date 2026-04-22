@@ -11,7 +11,8 @@ function Chat() {
     const messagesEndRef = useRef(null);
 
     // 生成一个临时的 memoryId
-    const [memoryId] = useState(() => Math.floor(Math.random() * 1000000).toString());
+    // const [memoryId] = useState(() => Math.floor(Math.random() * 1000000).toString());
+    const [memoryId, setMemoryId] = useState(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -20,6 +21,7 @@ function Chat() {
         scrollToBottom();
     }, [messages]);
 
+
     const handleSend = async () => {
         if (!input.trim() || isLoading) return;
 
@@ -27,27 +29,51 @@ function Chat() {
         const newUserMsg = { id: Date.now(), role: 'user', content: userMessage };
 
         const aiMsgId = Date.now() + 1;
-        setMessages(prev => [
-            ...prev,
-            newUserMsg,
-            { id: aiMsgId, role: 'ai', content: '', isTyping: true }
-        ]);
+        setMessages(prev => [...prev, newUserMsg, { id: aiMsgId, role: 'ai', content: '', isTyping: true }]);
 
         setInput('');
         setIsLoading(true);
 
+        // ================= 新增的核心业务逻辑 =================
+        let activeMemoryId = memoryId;
+
+        // 如果是第一次发消息，说明没有 memoryId，先去 MySQL 建个档！
+        if (!activeMemoryId) {
+            try {
+                const sessionRes = await fetch('/api/consultation/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        userId: 1,      // 写死 1，模拟当前登录用户的 ID
+                        patientId: 1,   // 写死 1，模拟当前选中的就诊人 ID
+                        title: userMessage.slice(0, 15) // 截取用户第一句话的前15个字作为 MySQL 里的会话标题
+                    })
+                });
+                const sessionData = await sessionRes.json();
+
+                // 假设后端返回的数据结构是 { code: 200, data: { memoryId: "xxxx" } }
+                if (sessionData.data && sessionData.data.memoryId) {
+                    activeMemoryId = sessionData.data.memoryId;
+                    setMemoryId(activeMemoryId); // 保存下来，这通对话以后都用这个 ID
+                    console.log("MySQL 会话创建成功，memoryId:", activeMemoryId);
+                }
+            } catch (err) {
+                console.error("向 MySQL 注册会话失败，降级使用本地 ID", err);
+                activeMemoryId = Math.floor(Math.random() * 1000000).toString();
+            }
+        }
+        // ===================================================
+
         try {
-            // ⚠️ 注意：如果你的 Controller 路径不是 /api/xiaozhi/chat，请务必修改这里
-            // 替换掉原来的 fetch
+            // 3. 带着刚刚从 MySQL 拿到的真实 activeMemoryId 去请求大模型
             const response = await fetch('/api/xiaozhi/chat', {
                 method: 'POST',
                 headers: {
-                    // 将原来的 text/event-stream 改为 text/stream 匹配后端！
                     'Accept': 'text/stream',
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    memoryId: memoryId,
+                    memoryId: activeMemoryId, // 使用真实的 ID
                     message: userMessage
                 })
             });
