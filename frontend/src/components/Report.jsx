@@ -1,19 +1,13 @@
 import { useMemo, useRef, useState } from 'react'
 import api from '../api'
 
-const REPORT_TYPES = [
-  { value: 1, label: '体检报告' },
-  { value: 2, label: '化验报告' },
-  { value: 3, label: '影像报告' },
-]
+const DEFAULT_USER_ID = 1
+const DEFAULT_REPORT_TYPE = 2
 
 function Report() {
   const fileInputRef = useRef(null)
   const [dragging, setDragging] = useState(false)
   const [file, setFile] = useState(null)
-  const [userId, setUserId] = useState(1)
-  const [patientId, setPatientId] = useState(() => Number(localStorage.getItem('selectedPatientId')) || 1)
-  const [reportType, setReportType] = useState(2)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -47,10 +41,8 @@ function Report() {
       setError('请先选择报告文件')
       return
     }
-    if (!userId || !patientId) {
-      setError('userId 与 patientId 不能为空')
-      return
-    }
+
+    const patientId = Number(localStorage.getItem('selectedPatientId')) || 1
 
     setLoading(true)
     setError('')
@@ -58,9 +50,9 @@ function Report() {
 
     try {
       const formData = new FormData()
-      formData.append('userId', String(userId))
+      formData.append('userId', String(DEFAULT_USER_ID))
       formData.append('patientId', String(patientId))
-      formData.append('reportType', String(reportType))
+      formData.append('reportType', String(DEFAULT_REPORT_TYPE))
       formData.append('file', file)
 
       const response = await api.post('/report/analyze', formData, {
@@ -90,43 +82,6 @@ function Report() {
       </div>
 
       <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-gray-100 md:p-6">
-        <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-          <label className="rounded-xl border border-gray-200 p-3">
-            <div className="mb-1 text-xs text-gray-500">用户 ID</div>
-            <input
-              type="number"
-              min="1"
-              value={userId}
-              onChange={(e) => setUserId(Number(e.target.value))}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            />
-          </label>
-          <label className="rounded-xl border border-gray-200 p-3">
-            <div className="mb-1 text-xs text-gray-500">就诊人 ID</div>
-            <input
-              type="number"
-              min="1"
-              value={patientId}
-              onChange={(e) => setPatientId(Number(e.target.value))}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            />
-          </label>
-          <label className="rounded-xl border border-gray-200 p-3">
-            <div className="mb-1 text-xs text-gray-500">报告类型</div>
-            <select
-              value={reportType}
-              onChange={(e) => setReportType(Number(e.target.value))}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
-            >
-              {REPORT_TYPES.map((type) => (
-                <option key={type.value} value={type.value}>
-                  {type.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
         <div
           onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
@@ -149,7 +104,7 @@ function Report() {
           <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-2xl">📄</div>
           <div className="text-sm font-medium text-gray-800 md:text-base">拖拽报告到此处，或点击上传</div>
           <div className="mt-1 text-xs text-gray-500">支持 PDF / TXT / 图片（png, jpg, jpeg, bmp）</div>
-          {file && (
+        {file && (
             <div className="mt-3 inline-flex items-center rounded-full bg-green-50 px-3 py-1 text-xs text-green-700">
               已选择：{file.name}
             </div>
