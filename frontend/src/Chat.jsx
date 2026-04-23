@@ -1,4 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 function Chat() {
@@ -216,7 +218,13 @@ function Chat() {
                                 ? 'bg-blue-600 text-white rounded-tr-sm'
                                 : 'bg-white text-gray-800 rounded-tl-sm border border-gray-100'
                         }`}>
-                            <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                            {msg.role === 'ai' ? (
+                                <div className="text-[15px] leading-7 break-words text-left [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-200 [&_blockquote]:pl-3 [&_blockquote]:text-gray-600 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-gray-100 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_h1]:my-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:text-base [&_h3]:font-semibold">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
+                                </div>
+                            ) : (
+                                <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                            )}
                             {msg.isTyping && (
                                 <span className="inline-block w-1.5 h-4 bg-blue-400 ml-1 animate-pulse align-middle"></span>
                             )}
