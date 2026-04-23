@@ -2,6 +2,7 @@ package com.atguigu.java.ai.langchain4j.controller;
 
 import com.atguigu.java.ai.langchain4j.bean.ApiResponse;
 import com.atguigu.java.ai.langchain4j.entity.Patient;
+import com.atguigu.java.ai.langchain4j.service.ConsultationSessionService;
 import com.atguigu.java.ai.langchain4j.service.PatientService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,9 +27,11 @@ import java.util.List;
 public class PatientController {
 
     private final PatientService patientService;
+    private final ConsultationSessionService consultationSessionService;
 
-    public PatientController(PatientService patientService) {
+    public PatientController(PatientService patientService, ConsultationSessionService consultationSessionService) {
         this.patientService = patientService;
+        this.consultationSessionService = consultationSessionService;
     }
 
     @Operation(summary = "按用户ID获取就诊人列表")
@@ -115,6 +118,9 @@ public class PatientController {
         if (existing == null || !userId.equals(existing.getUserId())) {
             return ApiResponse.failure("就诊人不存在");
         }
+
+        consultationSessionService.deleteByPatientId(id);
+
         boolean removed = patientService.removeById(id);
         if (!removed) {
             return ApiResponse.failure("删除就诊人失败");

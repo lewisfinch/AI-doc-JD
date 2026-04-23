@@ -28,16 +28,23 @@ function RecordList() {
   const [error, setError] = useState('')
   const [deletingId, setDeletingId] = useState(null)
 
-  const selectedPatientId = localStorage.getItem('selectedPatientId')
+  const selectedPatientId = Number(localStorage.getItem('selectedPatientId')) || null
 
   const loadRecords = async () => {
     setLoading(true)
     setError('')
+
+    if (!selectedPatientId) {
+      setRecords([])
+      setError('请先在“我的就诊人”中选择当前就诊人')
+      setLoading(false)
+      return
+    }
+
     try {
       const response = await api.get('/consultation', {
         params: {
-          userId: DEFAULT_USER_ID,
-          patientId: selectedPatientId ? Number(selectedPatientId) : undefined,
+          patientId: selectedPatientId,
         },
       })
       if (response.data?.code !== 0) {

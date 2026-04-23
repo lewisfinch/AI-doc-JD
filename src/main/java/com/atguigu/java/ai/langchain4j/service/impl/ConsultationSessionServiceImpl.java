@@ -1,5 +1,6 @@
 package com.atguigu.java.ai.langchain4j.service.impl;
 
+import com.atguigu.java.ai.langchain4j.assistant.ConsultationTitleAgent;
 import com.atguigu.java.ai.langchain4j.entity.ConsultationSession;
 import com.atguigu.java.ai.langchain4j.mapper.ConsultationSessionMapper;
 import com.atguigu.java.ai.langchain4j.service.ConsultationSessionService;
@@ -7,6 +8,8 @@ import com.atguigu.java.ai.langchain4j.store.MongoChatMemoryStore;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -24,9 +27,12 @@ public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSess
     private static final String DEFAULT_GREETING = "您好，我是京东健康AI医生。请问有什么可以帮您？您可详细描述您的症状、持续时间及伴随情况。";
 
     private final MongoChatMemoryStore mongoChatMemoryStore;
+    private final ConsultationTitleAgent consultationTitleAgent;
 
-    public ConsultationSessionServiceImpl(MongoChatMemoryStore mongoChatMemoryStore) {
+    public ConsultationSessionServiceImpl(MongoChatMemoryStore mongoChatMemoryStore,
+                                          ConsultationTitleAgent consultationTitleAgent) {
         this.mongoChatMemoryStore = mongoChatMemoryStore;
+        this.consultationTitleAgent = consultationTitleAgent;
     }
 
     @Override
@@ -38,7 +44,7 @@ public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSess
         session.setUserId(userId);
         session.setPatientId(patientId);
         session.setMemoryId(UUID.randomUUID().toString());
-        session.setTitle((title == null || title.isBlank()) ? "新建问诊" : title);
+        session.setTitle("新建问诊");
         session.setStatus(0);
         session.setCreateTime(LocalDateTime.now());
         baseMapper.insert(session);
@@ -52,17 +58,75 @@ public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSess
     }
 
     @Override
-    public List<ConsultationSession> listByUserId(Long userId, Long patientId) {
-        if (userId == null) {
-            throw new IllegalArgumentException("userId不能为空");
+    public List<ConsultationSession> listByPatientId(Long patientId) {
+        if (patientId == null) {
+            throw new IllegalArgumentException("patientId不能为空");
         }
         LambdaQueryWrapper<ConsultationSession> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(ConsultationSession::getUserId, userId)
+        wrapper.eq(ConsultationSession::getPatientId, patientId)
             .orderByDesc(ConsultationSession::getCreateTime);
-        if (patientId != null) {
-            wrapper.eq(ConsultationSession::getPatientId, patientId);
-        }
         return baseMapper.selectList(wrapper);
+    }
+
+    @Override
+    public boolean isFirstRound(String memoryId) {
+        if (memoryId == null || memoryId.isBlank()) {
+            return false;
+        }
+        List<ChatMessage> messages = mongoChatMemoryStore.getMessages(memoryId);
+        return messages.stream().noneMatch(msg -> msg instanceof UserMessage);
+    }
+
+    @Override
+    public void updateTitleAfterFirstRound(String memoryId, String userQuestion, String aiAnswer) {
+        if (memoryId == null || memoryId.isBlank() || userQuestion == null || userQuestion.isBlank()
+            || aiAnswer == null || aiAnswer.isBlank()) {
+            return;
+        }
+
+        LambdaQueryWrapper<ConsultationSession> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ConsultationSession::getMemoryId, memoryId);
+        ConsultationSession session = baseMapper.selectOne(wrapper);
+        if (session == null) {
+            return;
+        }
+        if (session.getTitle() != null && !session.getTitle().isBlank() && !"新建问诊".equals(session.getTitle())) {
+            return;
+        }
+
+        String content = "用户提问：" + userQuestion + "\nAI回答：" + aiAnswer;
+        String title;
+        try {
+            title = consultationTitleAgent.summarize(content);
+        } catch (Exception e) {
+            title = userQuestion;
+        }
+
+        title = sanitizeTitle(title, userQuestion);
+        session.setTitle(title);
+        baseMapper.updateById(session);
+    }
+
+    @Override
+    public int deleteByPatientId(Long patientId) {
+        if (patientId == null) {
+            throw new IllegalArgumentException("patientId不能为空");
+        }
+
+        LambdaQueryWrapper<ConsultationSession> listWrapper = new LambdaQueryWrapper<>();
+        listWrapper.eq(ConsultationSession::getPatientId, patientId);
+        List<ConsultationSession> sessions = baseMapper.selectList(listWrapper);
+
+        for (ConsultationSession session : sessions) {
+            String memoryId = session.getMemoryId();
+            if (memoryId != null && !memoryId.isBlank()) {
+                mongoChatMemoryStore.deleteMessages(memoryId);
+            }
+        }
+
+        LambdaQueryWrapper<ConsultationSession> deleteWrapper = new LambdaQueryWrapper<>();
+        deleteWrapper.eq(ConsultationSession::getPatientId, patientId);
+        return baseMapper.delete(deleteWrapper);
     }
 
     @Override
@@ -85,5 +149,26 @@ public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSess
         }
 
         return removeById(sessionId);
+    }
+    private String sanitizeTitle(String title, String fallback) {
+        String candidate = title == null ? "" : title.trim();
+        candidate = candidate.replace("\n", " ").replace("\r", " ").trim();
+        if (candidate.startsWith("\"") && candidate.endsWith("\"") && candidate.length() > 1) {
+            candidate = candidate.substring(1, candidate.length() - 1).trim();
+        }
+        if (candidate.startsWith("“") && candidate.endsWith("”") && candidate.length() > 1) {
+            candidate = candidate.substring(1, candidate.length() - 1).trim();
+        }
+
+        if (candidate.isBlank()) {
+            candidate = fallback == null ? "新建问诊" : fallback.trim();
+        }
+        if (candidate.isBlank()) {
+            candidate = "新建问诊";
+        }
+        if (candidate.length() > 20) {
+            candidate = candidate.substring(0, 20);
+        }
+        return candidate;
     }
 }

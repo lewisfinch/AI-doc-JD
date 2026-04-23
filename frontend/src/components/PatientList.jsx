@@ -41,7 +41,6 @@ function PatientList() {
   const handleSelect = (patientId) => {
     localStorage.setItem('selectedPatientId', String(patientId))
     setSelectedPatientId(patientId)
-    navigate(`/chat?patientId=${patientId}`)
   }
 
   const handleDelete = async (patientId) => {
@@ -102,9 +101,9 @@ function PatientList() {
               selectedPatientId === item.id ? 'ring-2 ring-blue-500' : ''
             }`}
           >
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-base font-medium text-gray-800">{item.name}</div>
-              <div className="text-xs text-gray-500">{item.relation}</div>
+            <div className="mb-2">
+              <div className="text-center text-base font-medium text-gray-800">姓名：{item.name}</div>
+              <div className="mt-1 text-center text-xs text-gray-500">{item.relation}</div>
             </div>
             <div className="mb-1 text-sm text-gray-600">
               {item.gender} · {item.age}岁
@@ -118,7 +117,7 @@ function PatientList() {
                 onClick={() => handleSelect(item.id)}
                 className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm text-white"
               >
-                设为当前就诊人并问诊
+                设为当前就诊人
               </button>
               <button
                 onClick={() => handleDelete(item.id)}

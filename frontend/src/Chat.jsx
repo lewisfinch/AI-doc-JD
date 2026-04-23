@@ -89,12 +89,17 @@ function Chat() {
         // 如果是第一次发消息，说明没有 memoryId，先去 MySQL 建个档！
         if (!activeMemoryId) {
             try {
+                const currentPatientId = Number(localStorage.getItem('selectedPatientId')) || null;
+                if (!currentPatientId) {
+                    throw new Error('请先选择当前就诊人');
+                }
+
                 const sessionRes = await fetch('/api/consultation/create', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         userId: 1,      // 写死 1，模拟当前登录用户的 ID
-                        patientId: 1,   // 写死 1，模拟当前选中的就诊人 ID
+                        patientId: currentPatientId,
                         title: userMessage.slice(0, 15) // 截取用户第一句话的前15个字作为 MySQL 里的会话标题
                     })
                 });
