@@ -3,11 +3,14 @@ package com.atguigu.java.ai.langchain4j.service.impl;
 import com.atguigu.java.ai.langchain4j.entity.ConsultationSession;
 import com.atguigu.java.ai.langchain4j.mapper.ConsultationSessionMapper;
 import com.atguigu.java.ai.langchain4j.service.ConsultationSessionService;
+import com.atguigu.java.ai.langchain4j.store.MongoChatMemoryStore;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import dev.langchain4j.data.message.AiMessage;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -17,6 +20,14 @@ import java.util.UUID;
 @Service
 public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSessionMapper, ConsultationSession>
     implements ConsultationSessionService {
+
+    private static final String DEFAULT_GREETING = "您好，我是京东健康AI医生。请问有什么可以帮您？您可详细描述您的症状、持续时间及伴随情况。";
+
+    private final MongoChatMemoryStore mongoChatMemoryStore;
+
+    public ConsultationSessionServiceImpl(MongoChatMemoryStore mongoChatMemoryStore) {
+        this.mongoChatMemoryStore = mongoChatMemoryStore;
+    }
 
     @Override
     public ConsultationSession createSession(Long userId, Long patientId, String title) {
@@ -31,6 +42,12 @@ public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSess
         session.setStatus(0);
         session.setCreateTime(LocalDateTime.now());
         baseMapper.insert(session);
+
+        mongoChatMemoryStore.updateMessages(
+            session.getMemoryId(),
+            Collections.singletonList(AiMessage.from(DEFAULT_GREETING))
+        );
+
         return session;
     }
 

@@ -1,2 +1,30 @@
-# 项目排除路径
+# ===== Java / Spring =====
 /target/
+*.class
+*.jar
+*.war
+
+# ===== Runtime / logs =====
+logs/
+*.log
+*.out
+*.err
+*.exit
+hs_err_pid*
+
+# ===== Uploads / local data =====
+/uploads/
+
+# ===== Environment =====
+.env
+.env.*
+
+# ===== IDE / OS =====
+.idea/
+.vscode/
+.DS_Store
+
+# ===== Frontend build deps & outputs =====
+/frontend/node_modules/
+/frontend/dist/
+/frontend/dist-ssr/

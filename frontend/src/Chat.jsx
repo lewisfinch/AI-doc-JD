@@ -1,25 +1,66 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 function Chat() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const [messages, setMessages] = useState([
         { id: 1, role: 'ai', content: '您好，我是京东健康AI医生。请问有什么可以帮您？您可详细描述您的症状、持续时间及伴随情况。', isTyping: false }
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const messagesEndRef = useRef(null);
 
-    // 生成一个临时的 memoryId
-    // const [memoryId] = useState(() => Math.floor(Math.random() * 1000000).toString());
-    const [memoryId, setMemoryId] = useState(null);
+    // 从URL参数获取memoryId
+    const [memoryId, setMemoryId] = useState(() => {
+        const urlMemoryId = searchParams.get('memoryId');
+        return urlMemoryId || null;
+    });
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
+    
+    // 加载历史聊天记录
+    const loadChatHistory = async (currentMemoryId) => {
+        if (!currentMemoryId) return;
+        
+        setIsLoadingHistory(true);
+        try {
+            const response = await fetch(`/api/chat/history/${currentMemoryId}`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.code === 0 && data.data) {
+                    const historyMessages = data.data.map((msg, index) => ({
+                        id: index + 1,
+                        role: msg.role,
+                        content: msg.content,
+                        isTyping: false
+                    }));
+                    
+                    if (historyMessages.length > 0) {
+                        setMessages(historyMessages);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('加载历史聊天记录失败:', error);
+        } finally {
+            setIsLoadingHistory(false);
+        }
+    };
+    
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+    
+    // 当memoryId变化时加载历史记录
+    useEffect(() => {
+        if (memoryId) {
+            loadChatHistory(memoryId);
+        }
+    }, [memoryId]);
 
 
     const handleSend = async () => {
@@ -144,6 +185,14 @@ function Chat() {
                     <i className="fas fa-ellipsis-h"></i>
                 </button>
             </div>
+
+            {/* 加载历史记录提示 */}
+            {isLoadingHistory && (
+                <div className="flex-none bg-blue-50 px-4 py-2 text-center text-sm text-blue-600">
+                    <i className="fas fa-spinner fa-spin mr-2"></i>
+                    正在加载历史聊天记录...
+                </div>
+            )}
 
             {/* 聊天区域 */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
