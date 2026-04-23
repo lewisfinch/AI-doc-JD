@@ -11,6 +11,7 @@ function Chat() {
     const [isLoading, setIsLoading] = useState(false);
     const [isLoadingHistory, setIsLoadingHistory] = useState(false);
     const messagesEndRef = useRef(null);
+    const skipNextHistoryLoadRef = useRef(false);
 
     // 从URL参数获取memoryId
     const [memoryId, setMemoryId] = useState(() => {
@@ -57,9 +58,14 @@ function Chat() {
     
     // 当memoryId变化时加载历史记录
     useEffect(() => {
-        if (memoryId) {
-            loadChatHistory(memoryId);
+        if (!memoryId) return;
+
+        if (skipNextHistoryLoadRef.current) {
+            skipNextHistoryLoadRef.current = false;
+            return;
         }
+
+        loadChatHistory(memoryId);
     }, [memoryId]);
 
 
@@ -95,6 +101,7 @@ function Chat() {
                 // 假设后端返回的数据结构是 { code: 200, data: { memoryId: "xxxx" } }
                 if (sessionData.data && sessionData.data.memoryId) {
                     activeMemoryId = sessionData.data.memoryId;
+                    skipNextHistoryLoadRef.current = true;
                     setMemoryId(activeMemoryId); // 保存下来，这通对话以后都用这个 ID
                     console.log("MySQL 会话创建成功，memoryId:", activeMemoryId);
                 }

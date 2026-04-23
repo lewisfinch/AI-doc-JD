@@ -64,4 +64,26 @@ public class ConsultationSessionServiceImpl extends ServiceImpl<ConsultationSess
         }
         return baseMapper.selectList(wrapper);
     }
+
+    @Override
+    public boolean deleteSession(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            throw new IllegalArgumentException("userId和sessionId不能为空");
+        }
+
+        LambdaQueryWrapper<ConsultationSession> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(ConsultationSession::getId, sessionId)
+            .eq(ConsultationSession::getUserId, userId);
+        ConsultationSession session = baseMapper.selectOne(wrapper);
+        if (session == null) {
+            return false;
+        }
+
+        String memoryId = session.getMemoryId();
+        if (memoryId != null && !memoryId.isBlank()) {
+            mongoChatMemoryStore.deleteMessages(memoryId);
+        }
+
+        return removeById(sessionId);
+    }
 }

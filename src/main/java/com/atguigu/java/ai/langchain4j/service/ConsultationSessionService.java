@@ -26,4 +26,13 @@ public interface ConsultationSessionService extends IService<ConsultationSession
      * @return 会话列表
      */
     java.util.List<ConsultationSession> listByUserId(Long userId, Long patientId);
+
+    /**
+     * 删除问诊会话，并清理对应聊天记忆
+     *
+     * @param userId 用户ID
+     * @param sessionId 会话ID
+     * @return 是否删除成功
+     */
+    boolean deleteSession(Long userId, Long sessionId);
 }
