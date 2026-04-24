@@ -179,6 +179,35 @@ function Chat() {
         if (e.key === 'Enter') handleSend();
     };
 
+    // 从AI回答中提取"涉及药品：a、b、c"一行，返回 { cleanedContent, drugs }
+    // 规则：匹配最后一处 "涉及药品：..." 到该行结束；药品按中文顿号 "、" 或英文逗号/中文逗号分割
+    const extractDrugs = (content) => {
+        if (!content) return { cleanedContent: content, drugs: [] };
+        // 允许 ：或: ，允许前面有 **、# 等 markdown 标记
+        const regex = /(?:^|\n)[\s*#>\-]*涉及药品[：:]\s*([^\n]+)/;
+        const match = content.match(regex);
+        if (!match) return { cleanedContent: content, drugs: [] };
+
+        const drugsRaw = match[1].trim()
+            // 去掉末尾的句号、markdown 粗体标记等
+            .replace(/\*+$/g, '')
+            .replace(/[。.\s]+$/g, '');
+
+        const drugs = drugsRaw
+            .split(/[、,，]/)
+            .map(s => s.replace(/[\*`\s]/g, '').trim())
+            .filter(Boolean);
+
+        // 从正文中移除这一行，避免重复展示
+        const cleanedContent = content.replace(match[0], '').trimEnd();
+        return { cleanedContent, drugs };
+    };
+
+    // 构造京东药品搜索跳转链接（使用搜索页，跳转到对应药品的商品列表）
+    const buildJdUrl = (drugName) => {
+        return `https://search.jd.com/Search?keyword=${encodeURIComponent(drugName)}&enc=utf-8`;
+    };
+
     return (
         <div className="flex flex-col h-screen bg-gray-50">
             {/* 头部 */}
@@ -224,9 +253,45 @@ function Chat() {
                                 : 'bg-white text-gray-800 rounded-tl-sm border border-gray-100'
                         }`}>
                             {msg.role === 'ai' ? (
-                                <div className="text-[15px] leading-7 break-words text-left [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-200 [&_blockquote]:pl-3 [&_blockquote]:text-gray-600 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-gray-100 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_h1]:my-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:text-base [&_h3]:font-semibold">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content || ''}</ReactMarkdown>
-                                </div>
+                                (() => {
+                                    // 打字中时先不提取，避免流式不完整内容误判
+                                    const { cleanedContent, drugs } = msg.isTyping
+                                        ? { cleanedContent: msg.content || '', drugs: [] }
+                                        : extractDrugs(msg.content || '');
+                                    return (
+                                        <>
+                                            <div className="text-[15px] leading-7 break-words text-left [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-200 [&_blockquote]:pl-3 [&_blockquote]:text-gray-600 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-gray-100 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_h1]:my-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:text-base [&_h3]:font-semibold">
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanedContent}</ReactMarkdown>
+                                            </div>
+                                            {drugs.length > 0 && (
+                                                <div className="mt-3 pt-3 border-t border-dashed border-gray-200">
+                                                    <div className="flex items-center text-xs text-gray-500 mb-2">
+                                                        <i className="fas fa-pills text-blue-500 mr-1.5"></i>
+                                                        为您找到以下相关药品（点击前往京东查看）
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {drugs.map((drug, idx) => (
+                                                            <a
+                                                                key={`${msg.id}-drug-${idx}`}
+                                                                href={buildJdUrl(drug)}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="group inline-flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-red-50 to-orange-50 hover:from-red-100 hover:to-orange-100 border border-red-100 rounded-xl text-sm text-gray-800 transition-all shadow-sm hover:shadow"
+                                                                title={`在京东查看「${drug}」`}
+                                                            >
+                                                                <span className="w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0">
+                                                                    JD
+                                                                </span>
+                                                                <span className="font-medium max-w-[140px] truncate">{drug}</span>
+                                                                <i className="fas fa-external-link-alt text-[10px] text-gray-400 group-hover:text-red-500"></i>
+                                                            </a>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    );
+                                })()
                             ) : (
                                 <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                             )}
