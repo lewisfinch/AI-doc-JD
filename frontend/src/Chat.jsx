@@ -57,6 +57,16 @@ function Chat() {
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    // 历史记录载入后，对最后一条 AI 消息做一次紧急检测（避免重复触发）
+    useEffect(() => {
+        if (isLoading) return;
+        const lastAi = [...messages].reverse().find(m => m.role === 'ai' && !m.isTyping);
+        if (lastAi && !emergencyMap[lastAi.id] && detectEmergency(lastAi.content)) {
+            triggerEmergencyCheck(lastAi.id, lastAi.content);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [messages, isLoading]);
     
     // 当memoryId变化时加载历史记录
     useEffect(() => {
@@ -163,6 +173,9 @@ function Chat() {
                 msg.id === aiMsgId ? { ...msg, isTyping: false } : msg
             ));
 
+            // 大模型回答结束：检测病症是否紧急，紧急则弹红色卡片并推荐附近医院
+            triggerEmergencyCheck(aiMsgId, fullContent);
+
         } catch (error) {
             console.error('API Error:', error);
             setMessages(prev => prev.map(msg =>
@@ -207,6 +220,216 @@ function Chat() {
     const buildJdUrl = (drugName) => {
         return `https://search.jd.com/Search?keyword=${encodeURIComponent(drugName)}&enc=utf-8`;
     };
+
+    // ======================= 紧急病症检测 & 附近医院推荐 =======================
+    // 紧急症状/关键词库（命中任意一个即视为紧急）
+    const EMERGENCY_KEYWORDS = [
+        '立即就医', '立刻就医', '尽快就医', '马上就医', '急诊', '拨打120', '120',
+        '危及生命', '生命危险', '抢救', '休克', '昏迷', '意识不清', '意识丧失',
+        '呼吸困难', '呼吸停止', '窒息', '心脏骤停', '心跳骤停', '心梗', '心肌梗死',
+        '中风', '脑卒中', '脑出血', '脑梗', '大出血', '咯血', '呕血', '便血不止',
+        '剧烈胸痛', '胸痛剧烈', '持续胸痛', '剧烈腹痛', '剧烈头痛',
+        '抽搐', '癫痫持续', '过敏性休克', '严重过敏', '喉头水肿',
+        '自杀', '自残', '服毒', '中毒', '烧伤严重', '大面积烧伤',
+        '高热惊厥', '持续高烧', '严重脱水'
+    ];
+
+    const detectEmergency = (content) => {
+        if (!content) return false;
+        return EMERGENCY_KEYWORDS.some(k => content.includes(k));
+    };
+
+    // 记录每条消息对应的急救信息： { [msgId]: { status, hospitals, error, coords } }
+    const [emergencyMap, setEmergencyMap] = useState({});
+
+    // 获取用户地理位置
+    const getUserLocation = () => new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+            reject(new Error('当前浏览器不支持定位'));
+            return;
+        }
+        navigator.geolocation.getCurrentPosition(
+            pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+            err => reject(err),
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+        );
+    });
+
+    // 通过 Overpass API（OpenStreetMap）搜索 5km 范围内正规医院
+    const fetchNearbyHospitals = async (lat, lon) => {
+        const radius = 5000; // 5km
+        const query = `
+            [out:json][timeout:15];
+            (
+              node["amenity"="hospital"](around:${radius},${lat},${lon});
+              way["amenity"="hospital"](around:${radius},${lat},${lon});
+              relation["amenity"="hospital"](around:${radius},${lat},${lon});
+            );
+            out center 20;
+        `;
+        const res = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+            body: query
+        });
+        if (!res.ok) throw new Error('医院查询服务不可用');
+        const data = await res.json();
+        const list = (data.elements || []).map(el => {
+            const elat = el.lat || (el.center && el.center.lat);
+            const elon = el.lon || (el.center && el.center.lon);
+            const tags = el.tags || {};
+            const name = tags['name:zh'] || tags.name || '未命名医院';
+            // 计算直线距离（米）
+            const dist = haversine(lat, lon, elat, elon);
+            return {
+                id: el.id,
+                name,
+                address: tags['addr:full'] || [tags['addr:province'], tags['addr:city'], tags['addr:district'], tags['addr:street'], tags['addr:housenumber']].filter(Boolean).join('') || '',
+                phone: tags.phone || tags['contact:phone'] || '',
+                emergency: tags.emergency === 'yes',
+                lat: elat,
+                lon: elon,
+                distance: dist
+            };
+        }).filter(h => h.lat && h.lon && h.name !== '未命名医院');
+        // 按距离排序，取前 3
+        list.sort((a, b) => a.distance - b.distance);
+        return list.slice(0, 3);
+    };
+
+    // 计算两点间球面距离（米）
+    const haversine = (lat1, lon1, lat2, lon2) => {
+        const toRad = d => (d * Math.PI) / 180;
+        const R = 6371000;
+        const dLat = toRad(lat2 - lat1);
+        const dLon = toRad(lon2 - lon1);
+        const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+        return 2 * R * Math.asin(Math.sqrt(a));
+    };
+
+    // 触发紧急检测与医院推荐
+    const triggerEmergencyCheck = async (msgId, content) => {
+        if (!detectEmergency(content)) return;
+        if (emergencyMap[msgId]) return; // 已处理过
+
+        setEmergencyMap(prev => ({ ...prev, [msgId]: { status: 'locating' } }));
+        try {
+            const coords = await getUserLocation();
+            setEmergencyMap(prev => ({ ...prev, [msgId]: { status: 'searching', coords } }));
+            const hospitals = await fetchNearbyHospitals(coords.lat, coords.lon);
+            if (!hospitals || hospitals.length === 0) {
+                setEmergencyMap(prev => ({ ...prev, [msgId]: { status: 'empty', coords } }));
+            } else {
+                setEmergencyMap(prev => ({ ...prev, [msgId]: { status: 'ok', coords, hospitals } }));
+            }
+        } catch (err) {
+            console.error('紧急医院查询失败:', err);
+            setEmergencyMap(prev => ({
+                ...prev,
+                [msgId]: { status: 'error', error: err.message || '定位或医院查询失败' }
+            }));
+        }
+    };
+
+    // 构造导航链接（高德地图 web，无需 key）
+    const buildMapUrl = (h, from) => {
+        const origin = from ? `${from.lon},${from.lat}` : '';
+        return `https://uri.amap.com/navigation?from=${origin}&to=${h.lon},${h.lat}&toname=${encodeURIComponent(h.name)}&mode=car&src=jd-health`;
+    };
+
+    // 渲染紧急急救红色卡片
+    const renderEmergencyCard = (msgId) => {
+        const info = emergencyMap[msgId];
+        if (!info) return null;
+        return (
+            <div className="mt-3 pt-3 border-t border-dashed border-red-200">
+                <div className="rounded-xl border-2 border-red-400 bg-gradient-to-br from-red-50 to-red-100 p-3 shadow-sm">
+                    <div className="flex items-center mb-2">
+                        <div className="w-7 h-7 rounded-full bg-red-600 text-white flex items-center justify-center mr-2 animate-pulse">
+                            <i className="fas fa-exclamation-triangle text-sm"></i>
+                        </div>
+                        <div className="flex-1">
+                            <div className="text-red-700 font-bold text-[15px]">紧急就医提醒</div>
+                            <div className="text-red-600 text-xs">您的症状可能较为紧急，请立即处理！</div>
+                        </div>
+                        <a
+                            href="tel:120"
+                            className="ml-2 px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold hover:bg-red-700 shadow"
+                        >
+                            <i className="fas fa-phone-alt mr-1"></i>拨打120
+                        </a>
+                    </div>
+
+                    {info.status === 'locating' && (
+                        <div className="text-sm text-red-700 flex items-center">
+                            <i className="fas fa-spinner fa-spin mr-2"></i>正在获取您的位置...
+                        </div>
+                    )}
+                    {info.status === 'searching' && (
+                        <div className="text-sm text-red-700 flex items-center">
+                            <i className="fas fa-spinner fa-spin mr-2"></i>正在搜索附近正规医院...
+                        </div>
+                    )}
+                    {info.status === 'empty' && (
+                        <div className="text-sm bg-white rounded-lg p-2 border border-red-200 text-red-700">
+                            <i className="fas fa-info-circle mr-1"></i>
+                            未能在您附近搜索到正规医院，请<strong className="mx-1">立即拨打 120</strong>寻求急救帮助！
+                        </div>
+                    )}
+                    {info.status === 'error' && (
+                        <div className="text-sm bg-white rounded-lg p-2 border border-red-200 text-red-700">
+                            <i className="fas fa-info-circle mr-1"></i>
+                            无法获取位置或查询医院（{info.error}），请<strong className="mx-1">立即拨打 120</strong>！
+                        </div>
+                    )}
+                    {info.status === 'ok' && (
+                        <div className="space-y-2">
+                            <div className="text-xs text-red-600 mb-1">
+                                <i className="fas fa-hospital mr-1"></i>为您推荐附近 {info.hospitals.length} 家医院（按距离排序）：
+                            </div>
+                            {info.hospitals.map((h, idx) => (
+                                <div key={h.id} className="bg-white rounded-lg p-2.5 border border-red-200 flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center">
+                                            <span className="w-5 h-5 rounded-full bg-red-500 text-white text-[11px] flex items-center justify-center mr-2 flex-shrink-0">{idx + 1}</span>
+                                            <span className="font-semibold text-gray-800 truncate">{h.name}</span>
+                                            {h.emergency && (
+                                                <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 flex-shrink-0">急诊</span>
+                                            )}
+                                        </div>
+                                        <div className="text-xs text-gray-500 mt-1 flex items-center flex-wrap gap-x-3">
+                                            <span><i className="fas fa-route mr-1 text-red-400"></i>约 {(h.distance / 1000).toFixed(2)} km</span>
+                                            {h.address && <span className="truncate"><i className="fas fa-map-marker-alt mr-1 text-red-400"></i>{h.address}</span>}
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-col gap-1 flex-shrink-0">
+                                        {h.phone && (
+                                            <a href={`tel:${h.phone}`} className="text-xs px-2 py-1 rounded bg-green-500 text-white hover:bg-green-600 text-center">
+                                                <i className="fas fa-phone-alt mr-1"></i>电话
+                                            </a>
+                                        )}
+                                        <a
+                                            href={buildMapUrl(h, info.coords)}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-xs px-2 py-1 rounded bg-red-500 text-white hover:bg-red-600 text-center"
+                                        >
+                                            <i className="fas fa-location-arrow mr-1"></i>导航
+                                        </a>
+                                    </div>
+                                </div>
+                            ))}
+                            <div className="text-[11px] text-red-500 pt-1">
+                                ⚠️ 如情况危急，请不要等待，<a href="tel:120" className="underline font-semibold">直接拨打 120</a>。
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
+    // ======================================================================
 
     return (
         <div className="flex flex-col h-screen bg-gray-50">
@@ -263,6 +486,7 @@ function Chat() {
                                             <div className="text-[15px] leading-7 break-words text-left [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-2 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_blockquote]:my-2 [&_blockquote]:border-l-4 [&_blockquote]:border-gray-200 [&_blockquote]:pl-3 [&_blockquote]:text-gray-600 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-gray-100 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre_code]:bg-transparent [&_h1]:my-3 [&_h1]:text-xl [&_h1]:font-semibold [&_h2]:my-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h3]:my-2 [&_h3]:text-base [&_h3]:font-semibold">
                                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanedContent}</ReactMarkdown>
                                             </div>
+                                            {renderEmergencyCard(msg.id)}
                                             {drugs.length > 0 && (
                                                 <div className="mt-3 pt-3 border-t border-dashed border-gray-200">
                                                     <div className="flex items-center text-xs text-gray-500 mb-2">
